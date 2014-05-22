@@ -5,8 +5,39 @@
 COMMAND=0
 GET_WORKSPACES=1
 SUBSCRIBE=2
+GET_TREE=4
 
 sock=$(i3 --get-socketpath)
+
+function recv { # receives one packet from i3wm
+    typeset -b tmp
+    typeset -b header
+    bsize=0
+    while [[ $bsize -lt 14 ]]; do
+        read  -N $((14 - bsize )) tmp
+        header="$header$tmp"
+        bsize=$(printf "%B" header | wc -c)
+    done
+    [[ "$(printf "%B" header | cut -c1-6 | tr -d '\n')" != "i3-ipc" ]] && {
+        echo "meh: header mismatch" >&2
+        printf "%B" header | od
+        exit 1
+    }
+    size=$(printf "%B" header | od -j 6 -N 4 -A n -t u4)
+    type=$(printf "%B" header | od -j 10 -N 4 -A n -t u4)
+    [[ -n "$1" && "$type" -ne "$1" ]] && {
+        echo "meh: wrong response type" >&2
+        exit 1
+    }
+    typeset -b body
+    bsize=0
+    while [[ "$bsize" -lt $size ]]; do
+        read  -N $(($size - bsize )) tmp
+        body="$body$tmp"
+        bsize=$(printf "%B" body | wc -c)
+    done
+    printf "%B" body
+}
 
 function int2bin { # returns a quoted string containing the binary rep of the int
     printf "%08x" "$1" | sed 's/\(..\)\(..\)\(..\)\(..\)/\\\x\4\\\x\3\\\x\2\\\x\1/'
@@ -16,8 +47,16 @@ function i3msg { # formats a command to i3 (prefix+len+type+msg)
     printf "i3-ipc$(int2bin ${#1})$(int2bin $2)$1"
 }
 
+function i3cmd { # executes an i3wm command
+    i3msg "$1" $COMMAND | nc -U "$sock" | recv
+}
+
+function i3winlist { # returns a tree
+    i3msg "" $GET_TREE | nc -U "$sock" | recv | jq '[recurse(.nodes[]) | {window: .window, name: .name}] | map(select(.window))'
+}
+
 function i3ws { # returns list of workspaces
-    i3msg "" $GET_WORKSPACES | nc -U "$sock" | cut -c15-
+    i3msg "" $GET_WORKSPACES | nc -U "$sock" | recv
 }
 #i3ws
 
@@ -54,34 +93,6 @@ function subscribe_loop { # mainloop for subscription event handler
     done
 }
 
-function recv { # receives one packet from i3wm
-    typeset -b tmp
-    typeset -b header
-    bsize=0
-    while [[ $bsize -lt 14 ]]; do
-        read  -N $((14 - bsize )) tmp
-        header="$header$tmp"
-        bsize=$(printf "%B" header | wc -c)
-    done
-    [[ "$(printf "%B" header | cut -c1-6 | tr -d '\n')" != "i3-ipc" ]] && {
-        echo "meh: header mismatch" >&2
-        printf "%B" header | od
-        exit 1
-    }
-    size=$(printf "%B" header | od -j 6 -N 4 -A n -t u4)
-    type=$(printf "%B" header | od -j 10 -N 4 -A n -t u4)
-    [[ -n "$1" && "$type" -ne "$1" ]] && {
-        echo "meh: wrong response type" >&2
-        exit 1
-    }
-    typeset -b body
-    bsize=0
-    while [[ "$bsize" -lt $size ]]; do
-        read  -N $(($size - bsize )) tmp
-        body="$body$tmp"
-        bsize=$(printf "%B" body | wc -c)
-    done
-    printf "%B" body
-}
-
-i3subscribe '["workspace"]' urgency_event_cb
+#i3subscribe '["workspace"]' urgency_event_cb
+#i3cmd "workspace 3"
+i3winlist
