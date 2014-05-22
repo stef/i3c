@@ -1,0 +1,87 @@
+#!/usr/bin/ksh
+# (c) stf, licence GPLv3+
+# depends on openbsd-netcat, jq, ksh
+
+COMMAND=0
+GET_WORKSPACES=1
+SUBSCRIBE=2
+
+sock=$(i3 --get-socketpath)
+
+function int2bin { # returns a quoted string containing the binary rep of the int
+    printf "%08x" "$1" | sed 's/\(..\)\(..\)\(..\)\(..\)/\\\x\4\\\x\3\\\x\2\\\x\1/'
+}
+
+function i3msg { # formats a command to i3 (prefix+len+type+msg)
+    printf "i3-ipc$(int2bin ${#1})$(int2bin $2)$1"
+}
+
+function i3ws { # returns list of workspaces
+    i3msg "" $GET_WORKSPACES | nc -U "$sock" | cut -c15-
+}
+#i3ws
+
+function i3filter_ws { # get filtered workspace list, depends on jq!
+    res=$(i3ws | jq "map(select($1))")
+    [[ "$res" == "[]" ]] && return
+    echo -n "$res"
+}
+#i3filter_ws ".focused == true"
+
+function debug_event_cb { # implement your own, use the powa of jq!
+    cat
+}
+
+function urgency_event_cb { # callback that displays urgent workspace info
+    buf="$(cat)"
+    case "$(echo -n "$buf" | jq -M '.change')" in
+        '"urgent"') i3filter_ws ".urgent == true" ; break;;
+    esac
+}
+
+function i3subscribe { # subscribes to $1 events, installs $2 as callback, or uses a default
+    i3msg "$1" $SUBSCRIBE | nc -q-1 -U "$sock" | subscribe_loop "${2:-debug_event_cb}"
+}
+
+function subscribe_loop { # mainloop for subscription event handler
+    ack="$(recv 2)" # handle subscribe ACK
+    [[ "$ack" != '{"success":true}' ]] && {
+        echo "meh: subscribe nack" >&2
+        exit 1
+    }
+    while true; do # handle packets
+        recv | $1 # is the event_handler callback
+    done
+}
+
+function recv { # receives one packet from i3wm
+    typeset -b tmp
+    typeset -b header
+    bsize=0
+    while [[ $bsize -lt 14 ]]; do
+        read  -N $((14 - bsize )) tmp
+        header="$header$tmp"
+        bsize=$(printf "%B" header | wc -c)
+    done
+    [[ "$(printf "%B" header | cut -c1-6 | tr -d '\n')" != "i3-ipc" ]] && {
+        echo "meh: header mismatch" >&2
+        printf "%B" header | od
+        exit 1
+    }
+    size=$(printf "%B" header | od -j 6 -N 4 -A n -t u4)
+    type=$(printf "%B" header | od -j 10 -N 4 -A n -t u4)
+    [[ -n "$1" && "$type" -ne "$1" ]] && {
+        echo "meh: wrong response type" >&2
+        exit 1
+    }
+    typeset -b body
+    bsize=0
+    while [[ "$bsize" -lt $size ]]; do
+        read  -N $(($size - bsize )) tmp
+        body="$body$tmp"
+        bsize=$(printf "%B" body | wc -c)
+    done
+    printf "%B" body
+}
+
+i3subscribe '["workspace"]' urgency_event_cb
