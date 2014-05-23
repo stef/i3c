@@ -107,7 +107,7 @@ function sticky_cb { # callback that implements sticky windows
         #'"focus"') [[ $(echo -n "$buf" | jq '.current.num') == "2" ]] && i3tree ; break;;
         '"focus"') {
                 cur="$(echo -n "$buf" | jq '.current.num')"
-                res="$(i3cmd '[title="Logwindow"] move container to workspace '$cur'; move down; focus up; resize grow height 40 px or 40 ppt')"
+                res="$(i3cmd '[title="sticky"] move container to workspace '$cur'; move down; focus up; resize grow height 40 px or 40 ppt')"
                 [[ "$res" == '[{"success":true},{"success":true},{"success":true},{"success":true}]' ]] || {
                         echo "meh: sticky fault -> $res" >&2
             }
@@ -118,5 +118,5 @@ function sticky_cb { # callback that implements sticky windows
 #i3subscribe '["workspace"]' urgency_event_cb
 #i3cmd "workspace 3"
 #i3winlist
-#i3winid "Logwindow"
+#i3winid "sticky"
 i3subscribe '["workspace"]' sticky_cb
