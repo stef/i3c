@@ -78,7 +78,7 @@ function i3subscribe { # subscribes to $1 events, installs $2 as callback, or us
 }
 
 function subscribe_loop { # mainloop for subscription event handler
-    ack="$(recv 2)" # handle subscribe ACK
+    ack="$(recv $SUBSCRIBE)" # handle subscribe ACK
     [[ "$ack" != '{"success":true}' ]] && {
         echo "meh: subscribe nack" >&2
         exit 1
