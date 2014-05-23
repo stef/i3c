@@ -51,8 +51,12 @@ function i3cmd { # executes an i3wm command
     i3msg "$1" $COMMAND | nc -U "$sock" | recv
 }
 
-function i3winlist { # returns a tree
-    i3msg "" $GET_TREE | nc -U "$sock" | recv | jq '[recurse(.nodes[]) | {window: .window, name: .name}] | map(select(.window))'
+function i3tree { # returns a tree
+    i3msg "" $GET_TREE | nc -U "$sock" | recv | jq '.'
+}
+
+function i3winlist { # returns a list of real windows
+    i3tree | jq '[recurse(.nodes[]) | {window: .window, name: .name}] | map(select(.window))'
 }
 
 function i3ws { # returns list of workspaces
@@ -93,6 +97,26 @@ function subscribe_loop { # mainloop for subscription event handler
     done
 }
 
+function i3winid {
+    i3winlist | jq '[map(select(.name == "'"$1"'"))]'
+}
+
+function sticky_cb { # callback that implements sticky windows
+    buf="$(cat)"
+    case "$(echo -n "$buf" | jq -M '.change')" in
+        #'"focus"') [[ $(echo -n "$buf" | jq '.current.num') == "2" ]] && i3tree ; break;;
+        '"focus"') {
+                cur="$(echo -n "$buf" | jq '.current.num')"
+                res="$(i3cmd '[title="Logwindow"] move container to workspace '$cur'; move down; focus up; resize grow height 40 px or 40 ppt')"
+                [[ "$res" == '[{"success":true},{"success":true},{"success":true},{"success":true}]' ]] || {
+                        echo "meh: sticky fault -> $res" >&2
+            }
+            }; break;;
+    esac
+}
+
 #i3subscribe '["workspace"]' urgency_event_cb
 #i3cmd "workspace 3"
-i3winlist
+#i3winlist
+#i3winid "Logwindow"
+i3subscribe '["workspace"]' sticky_cb
